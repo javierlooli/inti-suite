@@ -1,0 +1,308 @@
+import streamlit as st
+import pandas as pd
+import math
+
+from database import criar_tabelas, salvar_cliente, listar_clientes, salvar_lead, listar_leads
+
+criar_tabelas()
+
+st.set_page_config(
+    page_title="Inti Suite",
+    page_icon="☀️",
+    layout="wide"
+)
+
+# -----------------------------
+# FUNÇÕES
+# -----------------------------
+
+def calcular_dimensionamento(consumos, tarifa, hsp, performance_ratio, potencia_modulo):
+    consumo_medio = sum(consumos) / 12
+    geracao_diaria_necessaria = consumo_medio / 30
+    potencia_kwp = geracao_diaria_necessaria / (hsp * performance_ratio)
+    qtd_modulos = math.ceil((potencia_kwp * 1000) / potencia_modulo)
+    potencia_real_kwp = (qtd_modulos * potencia_modulo) / 1000
+    geracao_mensal_estimada = potencia_real_kwp * hsp * performance_ratio * 30
+    economia_mensal = geracao_mensal_estimada * tarifa
+    economia_anual = economia_mensal * 12
+
+    return {
+        "consumo_medio": consumo_medio,
+        "potencia_kwp": potencia_real_kwp,
+        "qtd_modulos": qtd_modulos,
+        "geracao_mensal": geracao_mensal_estimada,
+        "economia_mensal": economia_mensal,
+        "economia_anual": economia_anual
+    }
+
+
+# -----------------------------
+# MENU LATERAL
+# -----------------------------
+
+st.sidebar.title("☀️ Inti Suite")
+st.sidebar.caption("Engenharia, energia e automação")
+
+pagina = st.sidebar.radio(
+    "Menu",
+    [
+        "Dashboard",
+        "Clientes",
+        "Dimensionamento FV",
+        "Financeiro",
+        "Propostas",
+        "Portal do Cliente",
+        "Configurações"
+    ]
+)
+
+st.sidebar.divider()
+st.sidebar.caption("Versão MVP 0.1")
+
+
+# -----------------------------
+# DASHBOARD
+# -----------------------------
+
+if pagina == "Dashboard":
+    st.title("Dashboard")
+    st.subheader("Visão geral da Inti Suite")
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    c1.metric("Clientes cadastrados", "0")
+    c2.metric("Propostas geradas", "0")
+    c3.metric("Projetos FV", "0")
+    c4.metric("Leads do portal", "0")
+
+    st.divider()
+
+    st.info("Este é o painel inicial da Inti Suite. Os indicadores serão conectados ao banco de dados nas próximas etapas.")
+
+
+# -----------------------------
+# CLIENTES
+# -----------------------------
+
+elif pagina == "Clientes":
+    st.title("Clientes")
+    st.subheader("Cadastro e consulta de clientes")
+
+    with st.form("form_cliente"):
+        nome = st.text_input("Nome / Razão Social")
+        documento = st.text_input("CPF / CNPJ")
+        telefone = st.text_input("Telefone / WhatsApp")
+        email = st.text_input("E-mail")
+        cidade = st.text_input("Cidade", value="Macapá/AP")
+        endereco = st.text_area("Endereço")
+
+        salvar = st.form_submit_button("Salvar Cliente")
+
+    if salvar:
+        if nome.strip() == "":
+            st.error("Informe o nome do cliente.")
+        else:
+            salvar_cliente(nome, documento, telefone, email, cidade, endereco)
+            st.success(f"Cliente {nome} salvo com sucesso!")
+
+    st.divider()
+    st.subheader("Clientes cadastrados")
+
+    clientes = listar_clientes()
+
+    if clientes:
+        df_clientes = pd.DataFrame(
+            clientes,
+            columns=["ID", "Nome", "CPF/CNPJ", "Telefone", "E-mail", "Cidade", "Data Cadastro"]
+        )
+        st.dataframe(df_clientes, use_container_width=True)
+    else:
+        st.info("Nenhum cliente cadastrado ainda.")
+
+# -----------------------------
+# DIMENSIONAMENTO FV
+# -----------------------------
+
+elif pagina == "Dimensionamento FV":
+    st.title("Dimensionamento Fotovoltaico")
+    st.subheader("Cálculo preliminar por consumo mensal")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.header("Dados do Cliente")
+        nome_cliente = st.text_input("Nome do cliente")
+        cidade = st.text_input("Cidade", value="Macapá/AP")
+        concessionaria = st.text_input("Concessionária", value="Equatorial Energia")
+
+    with col2:
+        st.header("Parâmetros do Sistema")
+        tarifa = st.number_input("Tarifa de energia (R$/kWh)", min_value=0.0, value=1.00)
+        hsp = st.number_input("HSP média diária", min_value=0.0, value=4.5)
+        performance_ratio = st.number_input("Performance Ratio", min_value=0.1, max_value=1.0, value=0.80)
+        potencia_modulo = st.number_input("Potência do módulo (W)", min_value=100, value=585)
+
+    st.divider()
+
+    st.header("Consumo dos últimos 12 meses")
+
+    meses = [
+        "Janeiro", "Fevereiro", "Março", "Abril",
+        "Maio", "Junho", "Julho", "Agosto",
+        "Setembro", "Outubro", "Novembro", "Dezembro"
+    ]
+
+    consumos = []
+    cols = st.columns(4)
+
+    for i, mes in enumerate(meses):
+        with cols[i % 4]:
+            consumo = st.number_input(f"{mes} (kWh)", min_value=0.0, value=1000.0, key=f"consumo_{mes}")
+            consumos.append(consumo)
+
+    if st.button("Calcular Dimensionamento"):
+        resultado = calcular_dimensionamento(
+            consumos,
+            tarifa,
+            hsp,
+            performance_ratio,
+            potencia_modulo
+        )
+
+        st.divider()
+        st.header("Resultado do Dimensionamento")
+
+        r1, r2, r3, r4 = st.columns(4)
+
+        r1.metric("Consumo médio", f"{resultado['consumo_medio']:,.2f} kWh/mês")
+        r2.metric("Sistema recomendado", f"{resultado['potencia_kwp']:,.2f} kWp")
+        r3.metric("Quantidade de módulos", f"{resultado['qtd_modulos']} módulos")
+        r4.metric("Geração estimada", f"{resultado['geracao_mensal']:,.2f} kWh/mês")
+
+        st.subheader("Resumo financeiro")
+
+        f1, f2 = st.columns(2)
+        f1.metric("Economia mensal estimada", f"R$ {resultado['economia_mensal']:,.2f}")
+        f2.metric("Economia anual estimada", f"R$ {resultado['economia_anual']:,.2f}")
+
+        st.subheader("Tabela de Consumo")
+
+        df = pd.DataFrame({
+            "Mês": meses,
+            "Consumo (kWh)": consumos
+        })
+
+        st.dataframe(df, use_container_width=True)
+
+
+# -----------------------------
+# FINANCEIRO
+# -----------------------------
+
+elif pagina == "Financeiro":
+    st.title("Financeiro")
+    st.subheader("Simulações econômicas do projeto")
+
+    st.warning("Módulo em desenvolvimento.")
+
+    st.write("Aqui vamos calcular:")
+    st.write("- Investimento total")
+    st.write("- Economia mensal")
+    st.write("- Payback")
+    st.write("- VPL")
+    st.write("- TIR")
+    st.write("- Economia acumulada em 25 anos")
+
+
+# -----------------------------
+# PROPOSTAS
+# -----------------------------
+
+elif pagina == "Propostas":
+    st.title("Propostas")
+    st.subheader("Geração de propostas comerciais em PDF")
+
+    st.warning("Módulo em desenvolvimento.")
+
+    st.write("Aqui vamos gerar propostas com:")
+    st.write("- Logo da Inti")
+    st.write("- Dados do cliente")
+    st.write("- Sistema proposto")
+    st.write("- Investimento")
+    st.write("- Economia estimada")
+    st.write("- Condições comerciais")
+    st.write("- Assinatura")
+
+
+# -----------------------------
+# PORTAL DO CLIENTE
+# -----------------------------
+
+elif pagina == "Portal do Cliente":
+    st.title("Portal do Cliente")
+    st.subheader("Simulador público para geração de leads")
+
+    st.info("Este módulo será usado para clientes simularem o próprio sistema solar.")
+
+    nome_lead = st.text_input("Nome")
+    whatsapp = st.text_input("WhatsApp")
+    cidade_lead = st.text_input("Cidade", value="Macapá/AP")
+    consumo_medio_lead = st.number_input("Consumo médio mensal (kWh)", min_value=0.0, value=500.0)
+
+    if st.button("Simular Sistema"):
+        if nome_lead.strip() == "":
+            st.error("Informe o nome do lead.")
+        else:
+            hsp_padrao = 4.5
+            pr_padrao = 0.80
+            modulo_padrao = 585
+
+            potencia_kwp = (consumo_medio_lead / 30) / (hsp_padrao * pr_padrao)
+            qtd_modulos = math.ceil((potencia_kwp * 1000) / modulo_padrao)
+            potencia_real_kwp = (qtd_modulos * modulo_padrao) / 1000
+
+            salvar_lead(
+                nome_lead,
+                whatsapp,
+                cidade_lead,
+                consumo_medio_lead,
+                potencia_real_kwp,
+                qtd_modulos
+            )
+
+            st.success("Simulação concluída e lead salvo!")
+
+            s1, s2 = st.columns(2)
+            s1.metric("Sistema estimado", f"{potencia_real_kwp:,.2f} kWp")
+            s2.metric("Quantidade de módulos", f"{qtd_modulos} módulos")
+
+    st.divider()
+    st.subheader("Leads cadastrados")
+
+    leads = listar_leads()
+
+    if leads:
+        df_leads = pd.DataFrame(
+            leads,
+            columns=["ID", "Nome", "WhatsApp", "Cidade", "Consumo Médio", "Potência kWp", "Módulos", "Data"]
+        )
+        st.dataframe(df_leads, use_container_width=True)
+    else:
+        st.info("Nenhum lead cadastrado ainda.")
+
+# -----------------------------
+# CONFIGURAÇÕES
+# -----------------------------
+
+elif pagina == "Configurações":
+    st.title("Configurações")
+    st.subheader("Parâmetros gerais da Inti Suite")
+
+    st.text_input("Nome da empresa", value="Inti Engenharia e Consultoria")
+    st.text_input("Cidade base", value="Macapá/AP")
+    st.text_input("Concessionária padrão", value="Equatorial Energia")
+    st.number_input("HSP padrão", min_value=0.0, value=4.5)
+    st.number_input("Performance Ratio padrão", min_value=0.1, max_value=1.0, value=0.80)
+    st.number_input("Potência padrão do módulo (W)", min_value=100, value=585)
+
+    st.button("Salvar Configurações")
